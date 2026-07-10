@@ -335,9 +335,13 @@
         <remove_from_list name="$targetStations" exact="$sourceStation" />
 
         <!-- Warenliste für Push-Trades erstellen -->
+        <!-- Bei aktiviertem Overflow-Verkauf auch nur-intern gehandelte Waren aufnehmen, damit für sie NPC-Angebote gesucht werden (die eigentliche Schwellwert-Prüfung erfolgt pro Ware in FindPossibleTransports) -->
+        <set_value name="$overflowEnabled" exact="@$order.$overflowSellThreshold != null and @$order.$overflowSellThreshold lt 100" />
         <find_sell_offer seller="$sourceStation" result="$sellOffers" tradepartner="$ship" multiple="true" usereservations="false" excludeempty="true" />
         <run_actions ref="GetTradewaresFromOffers" result="$pushWares">
           <param name="tradeoffers" value="$sellOffers" />
+          <param name="overflowStation" value="if $overflowEnabled then $sourceStation else null" />
+          <param name="overflowThreshold" value="if $overflowEnabled then $order.$overflowSellThreshold else null" />
         </run_actions>
 
         <!-- Warenliste für Pull-Trades erstellen -->
@@ -1013,12 +1017,21 @@
     <library name="GetTradewaresFromOffers" purpose="run_actions" namespace="this">
       <params>
         <param name="tradeoffers" />
+        <param name="overflowStation" default="null" comment="Wenn gesetzt (Overflow aktiv), werden nur-intern gehandelte Waren aufgenommen, sofern ihr Füllstand an dieser Station den Schwellwert erreicht" />
+        <param name="overflowThreshold" default="null" />
       </params>
       <actions>
         <create_list name="$result" />
         <do_for_each in="$tradeoffers" name="$offer">
+          <!-- Nur-intern gehandelte Ware (Whitelist = ausschließlich Spieler) -->
           <do_if value="not $offer.restriction.inverted and $offer.restriction.factions.count == 1 and $offer.restriction.factions.{1} == faction.player">
-            <continue comment="Ware wird nicht mit anderen Fraktionen gehandelt" />
+            <!-- Ausschließen, außer Overflow ist aktiv und der Füllstand dieser Ware erreicht den Schwellwert -->
+            <do_if value="$overflowStation == null or $overflowThreshold == null
+                or not (if @$overflowStation.cargo.{$offer.ware}.target gt 0
+                        then (100.0 * @$overflowStation.cargo.{$offer.ware}.count / @$overflowStation.cargo.{$offer.ware}.target) ge $overflowThreshold
+                        else false)">
+              <continue comment="Ware wird nicht mit anderen Fraktionen gehandelt (bzw. Füllstand unter Overflow-Schwellwert)" />
+            </do_if>
           </do_if>
           <do_if value="$result.indexof.{$offer.ware} == 0">
             <append_to_list name="$result" exact="$offer.ware" />

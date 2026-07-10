@@ -11,7 +11,7 @@
       </actions>
     </cue>
 
-    <cue name="Config" version="7">
+    <cue name="Config" version="8">
       <conditions>
         <check_any>
           <event_cue_signalled cue="md.Setup.GameStart" />
@@ -30,6 +30,7 @@
         <set_value name="global.$WarehouseFleets.$waitInDockL" exact="false" />
         <set_value name="global.$WarehouseFleets.$minCargoUsage" exact="50" />
         <set_value name="global.$WarehouseFleets.$tradeGatePenalty" exact="20" />
+        <set_value name="global.$WarehouseFleets.$overflowSellThreshold" exact="100" comment="100 = deaktiviert" />
       </actions>
 
       <patch sinceversion="6">
@@ -76,6 +77,12 @@
 
       <patch sinceversion="7">
         <set_value name="global.$WarehouseFleets.$minCargoUsage" exact="[global.$WarehouseFleets.$minCargoUsage, 90].min" comment="reduced max value from 100 to 90" />
+      </patch>
+
+      <patch sinceversion="8">
+        <do_if value="@global.$WarehouseFleets.$overflowSellThreshold == null">
+          <set_value name="global.$WarehouseFleets.$overflowSellThreshold" exact="100" comment="100 = deaktiviert" />
+        </do_if>
       </patch>
     </cue>
 
@@ -615,6 +622,15 @@
                 else 'trade'
               " />
 
+              <!-- Overflow-Verkauf: Verkauf vom Home-Warehouse an eine fremde Fraktion, wenn die Ware dort über dem eingestellten Schwellwert liegt.
+                   In diesem Fall dürfen die Trade-Rules der eigenen Station überschrieben werden, um den Überschuss abzustoßen. -->
+              <set_value name="$isOverflowSell" exact="$transportType == 'trade'
+                and $provider.idcode == $order.$sourceStation.idcode
+                and @$order.$overflowSellThreshold != null
+                and (if @$order.$overflowSellThreshold lt 100 and $provider.cargo.{$providerOffer.ware}.target gt 0
+                     then (100.0 * $provider.cargo.{$providerOffer.ware}.count / $provider.cargo.{$providerOffer.ware}.target) ge $order.$overflowSellThreshold
+                     else false)" />
+
               <!-- Kapazität des Schiffs ermitteln -->
               <set_value name="$shipCapacity" exact="
                 if $providerOffer.ware.waretransport == waretransport.solid  then $ship.cargo.capacity.solid
@@ -628,21 +644,24 @@
 
               <!-- Unprofitable Trades kann man hier schon erkennen und abbrechen -->
               <set_value name="$profitRatio" exact="($receiverOffer.unitprice)f / ($providerOffer.unitprice)f - 1f" comment="Wertebereich ca. (-1, +1)" />
-              <do_if value="$transportType == 'trade' and $profitRatio le 0.05">
-                <continue />
+              <do_if value="$transportType == 'trade' and ((not $isOverflowSell and $profitRatio le 0.05) or ($isOverflowSell and $profitRatio lt 0))">
+                <continue comment="Normale Trades brauchen mind. 5% Gewinn; Overflow-Verkäufe mind. den eigenen Verkaufspreis (profitRatio ge 0), um Überschuss nicht unter Wert abzugeben. Der beste (teuerste) Käufer wird später über das Rating ausgewählt." />
               </do_if>
 
               <!-- Bei Trade Transports prüfen, ob das eigene Buy/Sell Offer Restriktionen hat und diese berücksichtigen -->
               <do_if value="$transportType == 'trade'">
                 <set_value name="$sourceOffer" exact="if $provider.idcode == $order.$sourceStation.idcode then $providerOffer else $receiverOffer" />
                 <set_value name="$targetStation" exact="if $provider.idcode == $order.$sourceStation.idcode then $receiverOffer.owner else $providerOffer.owner" />
-                <set_value name="$allowed" exact="if not $sourceOffer.restriction.inverted 
+                <set_value name="$allowed" exact="if not $sourceOffer.restriction.inverted
                   then $sourceOffer.restriction.factions.indexof.{$targetStation.owner} gt 0
                   else $sourceOffer.restriction.factions.indexof.{$targetStation.owner} == 0
                 " comment="not inverted = Whitelist" />
-                <do_if value="not $allowed">
+                <do_if value="not $allowed and not $isOverflowSell">
                   <debug_to_file chance="100" name="$ship.idcode" directory="'WarehouseFleets'" text="'Trade ' + $sourceOffer.ware + ' ' + (if $provider.idcode == $order.$sourceStation.idcode then 'to' else 'from') + ' ' + $targetStation.owner + ' not allowed'" />
                   <continue comment="Trade durch Restriktionen verboten" />
+                </do_if>
+                <do_if value="not $allowed and $isOverflowSell">
+                  <debug_to_file chance="100" name="$ship.idcode" directory="'WarehouseFleets'" text="'Overflow sell ' + $sourceOffer.ware + ' to ' + $targetStation.owner + ' - bypassing trade rule (warehouse at/over ' + $order.$overflowSellThreshold + '%)'" />
                 </do_if>
               </do_if>
 

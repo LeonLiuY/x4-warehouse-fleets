@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<aiscript name="WarehouseFleet" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="/home/manuel/Nextcloud/X4 Foundations/2026-02-28/libraries/aiscripts.xsd" version="43">
+<aiscript name="WarehouseFleet" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="/home/manuel/Nextcloud/X4 Foundations/2026-02-28/libraries/aiscripts.xsd" version="44">
 
   <order id="WarehouseFleet" name="WarehouseFleet" description="Warehouse Fleet" category="trade" infinite="true">
     <params>
@@ -52,6 +52,11 @@
       <param name="tradeGatePenalty" default="global.$WarehouseFleets.$tradeGatePenalty" type="number" text="Trade Gate Penalty (%)">
         <input_param name="min" value="0" />
         <input_param name="max" value="90" />
+      </param>
+      <param name="overflowSellThreshold" default="global.$WarehouseFleets.$overflowSellThreshold" type="number" text="Overflow Sell Threshold (%)">
+        <input_param name="min" value="0" />
+        <input_param name="max" value="100" />
+        <patch sinceversion="44" value="if @$overflowSellThreshold == null then global.$WarehouseFleets.$overflowSellThreshold else $overflowSellThreshold" />
       </param>
       <param name="waitInDockS" type="bool" default="global.$WarehouseFleets.$waitInDockS" text="Dock idle S-sized ships">
         <patch sinceversion="43" value="global.$WarehouseFleets.$waitInDockS" />

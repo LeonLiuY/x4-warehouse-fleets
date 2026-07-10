@@ -559,6 +559,24 @@
           </do_if>
         </do_all>
 
+        <!-- Ermittle, welche (Provider, Ware)-Kombinationen der Provider auch selbst ankauft.
+             Ein Provider, der eine Ware verkauft, aber nicht selbst ankauft, ist eine reine
+             Quelle (z.B. Fabrik-Output) und soll schnellstmöglich abtransportiert werden. -->
+        <set_value name="$providerBuys" exact="table[]" />
+        <do_all exact="$providers.count" counter="$idxProvider">
+          <set_value name="$provider" exact="$providers.{$idxProvider}" />
+          <do_if value="$provider.trueowner == faction.player and $provider.class != class.buildstorage">
+            <find_buy_offer buyer="$provider" result="$buyCheckOffers" multiple="true" usereservations="true" wares="$allwares" tradepartner="$ship" excludeempty="false">
+              <match_buyer>
+                <match_use_blacklist object="$ship" group="blacklistgroup.civilian" type="blacklisttype.objectactivity" />
+              </match_buyer>
+            </find_buy_offer>
+            <do_all exact="$buyCheckOffers.count" counter="$idxOffer">
+              <set_value name="$providerBuys.{'$' + $provider.idcode + '/' + $buyCheckOffers.{$idxOffer}.ware.id}" exact="true" />
+            </do_all>
+          </do_if>
+        </do_all>
+
         <!-- Berechne Reservierungen -->
         <set_value name="$reservations" exact="table[]" />
         <do_for_each in="$deliveries" name="$delivery">
@@ -657,11 +675,13 @@
 
               <!-- Verbraucher-Erkennung: Receiver kauft die Ware an, verkauft sie aber nicht selbst => kein Balancing-Knoten (z.B. Fabrik-Input) -->
               <set_value name="$receiverIsConsumer" exact="$transportType == 'distribution' and not (@$receiverSells.{'$' + $receiver.idcode + '/' + $receiverOffer.ware.id} == true)" />
+              <!-- Quellen-Erkennung: Provider verkauft die Ware, kauft sie aber nicht selbst an => kein Balancing-Knoten (z.B. Fabrik-Output) -->
+              <set_value name="$providerIsProducer" exact="$transportType == 'distribution' and not (@$providerBuys.{'$' + $provider.idcode + '/' + $providerOffer.ware.id} == true)" />
 
               <!-- Berechnung der Waren-Menge ($amount) -->
               <do_if value="$transportType == 'distribution'">
-                <do_if value="$receiverIsConsumer">
-                  <!-- Reiner Verbraucher (z.B. Fabrik-Input): bis zur Nachfrage auffüllen, Füllstände nicht angleichen -->
+                <do_if value="$receiverIsConsumer or $providerIsProducer">
+                  <!-- Verbraucher (Fabrik-Input) auffüllen bzw. Quelle (Fabrik-Output) abtransportieren: soviel bewegen wie verfügbar und wie der Receiver aufnehmen kann, ohne Füllstände anzugleichen -->
                   <set_value name="$equalizingAmount" exact="null" />
                   <set_value name="$amount" exact="[[$maxWareAmount, $providerOffer.amount, $receiverOffer.desiredamount].min, 0].max" />
                 </do_if>
@@ -694,9 +714,13 @@
 
               <do_if value="$transportType == 'distribution'">
                 <do_if value="$receiverIsConsumer">
-                  <!-- Verbraucher: Wichtigkeit nur anhand des eigenen Füllstands (nie negativ, kein Vergleich mit dem Provider-Füllstand) -->
-                  <set_value name="$importance" exact="0.5 * (1.0 - $receiverCargoRatio/200.0) * ($order.$prioDistribution/10f)" />
+                  <!-- Verbraucher (Fabrik-Input): wie Balancing, aber der Provider gilt als voll (100%) => nur der eigene Füllstand zählt, nie negativ, gleiche Größenordnung wie Balancing -->
+                  <set_value name="$importance" exact="(100.0 - $receiverCargoRatio) * (1.0 - $receiverCargoRatio/200.0) * ($order.$prioDistribution/10f)" />
                 </do_if>
+                <do_elseif value="$providerIsProducer">
+                  <!-- Quelle (Fabrik-Output): wie Balancing, aber der Receiver gilt als leer (hat Platz) => nur die Provider-Füllung zählt, je voller desto dringender, nie negativ, gleiche Größenordnung wie Balancing -->
+                  <set_value name="$importance" exact="$providerCargoRatio * ($order.$prioDistribution/10f)" />
+                </do_elseif>
                 <do_else>
                   <set_value name="$importance" exact="($providerCargoRatio - $receiverCargoRatio) * (1.0 - $receiverCargoRatio/200.0) * ($order.$prioDistribution/10f)" />
                 </do_else>
@@ -737,6 +761,7 @@
                   + ', cargoUsage = ' + '%.1s'.[100.0 * $cargoUsage] + '%'
                   + ', completesBuildRequest = ' + $completesBuildRequest
                   + ', consumer = ' + $receiverIsConsumer
+                  + ', producer = ' + $providerIsProducer
                 "
                 output="false" append="true" />
 
